@@ -41,8 +41,9 @@ pin out bit motor_fast = 0 "Request second spindle motor speed";
 /* spindle status pin */
 pin in bit changing     = 0  "Gear change in progress";
 
+pin in bit spindle_on     = 0  "Motion component spindle.N.on ";
+
 pin out bit estop_out       = 0  "This pin will trigger emergency stop in case of an unrecoverably fatal error.";
-pin in bit machine_ready    = 0   "This pin notifies us that an emergency stop was triggered outside the component.";
 
 function _;
 
@@ -97,13 +98,18 @@ FUNCTION(_)
     if (!g_setup_done)
     {
         setup(__comp_inst, period);
-        pair_t *neutral_gear = select_gear_from_rpm(g_tree_rpm, 0);
-        set_gear_request(neutral_gear);
+        set_gear_request(&zero_gear);
         g_setup_done = true;
     }
 
+    if (!spindle_on)
+    {
+        set_gear_request(&zero_gear);
+        return;
+    }
+
     /* Gear shift is in progress */
-    if (!changing || spindle_speed_in_abs == 0)
+    if (!changing)
     {
         if (g_last_spindle_speed == spindle_speed_in_abs)
         {

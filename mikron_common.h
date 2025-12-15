@@ -72,6 +72,8 @@ static pair_t mikron_gears[] =
     { 4000, 1105   }               /*   1 0 0 0 1 0 1 0 0 0 1 */
 };
 
+static pair_t zero_gear = {0, 0};
+
 /* total number of selectable gears including neutral */
 #define MIKRON_NUM_GEARS        (sizeof(mikron_gears)/sizeof(pair_t))
 /* max gear index in array */
