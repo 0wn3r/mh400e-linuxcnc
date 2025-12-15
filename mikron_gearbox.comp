@@ -103,7 +103,7 @@ FUNCTION(_)
     }
 
     /* Gear shift is in progress */
-    if (!changing)
+    if (!changing || spindle_speed_in_abs == 0)
     {
         if (g_last_spindle_speed == spindle_speed_in_abs)
         {
