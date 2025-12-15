@@ -1,0 +1,126 @@
+/*
+LinuxCNC component for controlling the MIKRON gearbox.
+
+Copyright (C) 2018 Sergey 'Jin' Bostandzhyan <jin@mediatomb.cc>
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+*/
+
+component mikron_gearbox "Component to control output block position request for Mikron WF41C gearbox";
+author "Sergey 'Jin' Bostandzhyan && Eduard Kachur";
+license "GPL";
+
+/* to be connected with motion.spindle−speed−out−abs */
+pin in float spindle_speed_in_abs = 0 "Desired spindle speed in rotations per minute, always positive regardless of spindle direction.";
+pin out float spindle_speed_out = 0 "Actual spindle speed feedback in revolutions per second";
+
+pin out bit block_one_forward = 0 "Request forward position for block 1";
+pin out bit block_one_middle = 0 "Request middle position for block 1";
+pin out bit block_one_backward = 0 "Request backward position for block 1";
+pin out bit block_two_forward = 0 "Request forward position for block 2";
+pin out bit block_two_middle = 0 "Request middle position for block 2";
+pin out bit block_two_backward = 0 "Request backward position for block 2";
+pin out bit block_three_forward = 0 "Request forward position for block 3";
+pin out bit block_three_middle = 0 "Request middle position for block 3";
+pin out bit block_three_backward = 0 "Request backward position for block 3";
+pin out bit motor_slow = 0 "Request first spindle motor speed";
+pin out bit motor_fast = 0 "Request second spindle motor speed";
+
+/* spindle status pin */
+pin in bit changing     = 0  "Gear change in progress";
+
+pin out bit estop_out       = 0  "This pin will trigger emergency stop in case of an unrecoverably fatal error.";
+pin in bit machine_ready    = 0   "This pin notifies us that an emergency stop was triggered outside the component.";
+
+function _;
+
+option singleton yes;
+
+;;
+
+#include <rtapi_math.h>
+
+#include "mikron_common.h"
+#include "mikron_util.h"
+#include "mikron_gears.h"
+
+static float g_last_spindle_speed = 0;
+
+static tree_node_t *g_tree_rpm = NULL;
+
+static bool g_setup_done = false;
+
+/* one time setup, called from the main function to initialize whatever we
+ * need */
+FUNCTION(setup)
+{
+    int i;
+
+    /* Initialize state data structures */
+    gearbox_setup(__comp_inst, period);
+
+    /* we want to have key:value pairs in the binary search tree, where
+     * the value represents the index of the key in our gears array. So
+     * we'll put things together the way we need them for the tree generation
+     */
+    pair_t temp[MIKRON_NUM_GEARS];
+    for (i = 0; i < MIKRON_NUM_GEARS; i++)
+    {
+        temp[i].key = mikron_gears[i].key;
+        temp[i].value = i;
+    }
+
+    /* build up binary tree from the gears array to search by rpm, this
+     * array is already sorted */
+    g_tree_rpm = tree_from_sorted_array(temp, MIKRON_NUM_GEARS);
+
+    g_last_spindle_speed = spindle_speed_in_abs;
+}
+
+
+/* main component function */
+FUNCTION(_)
+{
+    /* perform one time setup */
+    if (!g_setup_done)
+    {
+        setup(__comp_inst, period);
+        pair_t *neutral_gear = select_gear_from_rpm(g_tree_rpm, 0);
+        set_gear_request(neutral_gear);
+        g_setup_done = true;
+    }
+
+    /* Gear shift is in progress */
+    if (!changing)
+    {
+        if (g_last_spindle_speed == spindle_speed_in_abs)
+        {
+            /* Nothing to do */
+            return;
+        }
+
+        /* Select new gear from rpm */
+        pair_t *new_gear = select_gear_from_rpm(g_tree_rpm,
+                                                spindle_speed_in_abs);
+
+        spindle_speed_out = new_gear->key / 60.0;
+
+        /* Save the speed so we don't call gear selection if it not changed */
+        g_last_spindle_speed = spindle_speed_in_abs;
+
+        /* This call will set the outputs pins! */
+        set_gear_request(new_gear);
+    }
+}

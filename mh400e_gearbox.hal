@@ -1,5 +1,4 @@
 loadrt mh400e_gearbox
-loadusr -Wn mh400e_gearbox_sim pyvcp -c mh400e_gearbox_sim mh400e_gearbox.xml
 # Inputs to LinuxCNC (Outputs from hardware)
 net set-spindle-speed mh400e-gearbox.spindle-speed-in-abs <= mh400e_gearbox_sim.spindle−speed−in−abs-f
 # Outputs from LinuxCNC (Inputs to hardware)
@@ -16,10 +15,3 @@ net set-input-left mh400e-gearbox.input-left => mh400e_gearbox_sim.input-left
 net set-input-right mh400e-gearbox.input-right => mh400e_gearbox_sim.input-right
 net set-input-center mh400e-gearbox.input-center => mh400e_gearbox_sim.input-center
 net set-input-left-center mh400e-gearbox.input-left-center => mh400e_gearbox_sim.input-left-center
-
-loadrt threads name1=mh400e-sim-thread period1=1000000
-addf mh400e-gearbox mh400e-sim-thread
-start
-waitusr mh400e_gearbox_sim
-stop
-unload mh400e_gearbox

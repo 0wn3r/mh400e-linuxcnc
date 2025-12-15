@@ -1,5 +1,5 @@
 /*
-LinuxCNC component for controlling the MAHO MH400E gearbox.
+LinuxCNC component for controlling the MIKRON gearbox.
 
 Copyright (C) 2018 Sergey 'Jin' Bostandzhyan <jin@mediatomb.cc>
 
@@ -18,39 +18,23 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 */
 
-/* Implementation of the twitching functionality. */
+/* Functions related to gear switching. */
 
-#ifndef __MH400E_TWITCH_H__
-#define __MH400E_TWITCH_H__
+#ifndef __MIKRON_GEARS_H__
+#define __MIKRON_GEARS_H__
 
-#include <rtapi.h>
+#include "mikron_common.h"
 
-#include "mh400e_common.h"
+/* One time setup function to prepare data structures related to gearbox 
+ * switching*/
+FUNCTION(gearbox_setup);
 
-/* Call only once, sets up the global twitch state data structure */
-FUNCTION(twitch_setup);
-
-/* Call this function to start twitching.
- *
- * Makes sure that we are in a defined state (both pins are off) and
- * sets up twitch_do() */
-static void twitch_start(long period);
-
-/* Call this function once per each thread cycle to handle twitching */
-static void twitch_handle(long period);
-
-/* Call this function to stop twitching.
- *
- * Stops twitching, respecting the specified delay, always sets the
- * next function pointer to twitch_stop(). */
-static void twitch_stop(long period);
-
-/* Returns true if stop twitching operation completed. */
-static bool twitch_stop_completed(void);
+/* Set gear request */
+static void set_gear_request(pair_t *target_gear);
 
 /* really ugly way of keeping more order and splitting the sources,
  * halcompile does not allow to link multipe source files together, so
  * ultimately all sources need to be included by the .comp directly */
-#include "mh400e_twitch.c"
+#include "mikron_gears.c"
 
-#endif//__MH400E_TWITCH_H__
+#endif//__MIKRON_GEARS_H__
