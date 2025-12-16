@@ -48,7 +48,7 @@ typedef struct
 /* lookup table from rpm to gearbox status pin values */
 static pair_t mikron_gears[] =
 {  /* rpm   bitmask                msb 10 9 8 7 6 5 4 3 2 1 0 lsb */
-    { 0,    128      },              /*   neutral         0 1 0 */
+    { 0,    640      },              /*   1 0 1 0 neutral     */
     { 40,   802    },              /*   0 1 1 0 0 1 0 0 0 1 0 */
     { 50,   804    },              /*   0 1 1 0 0 1 0 0 1 0 0 */
     { 63,   801    },              /*   0 1 1 0 0 1 0 0 0 0 1 */

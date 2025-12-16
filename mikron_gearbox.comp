@@ -43,6 +43,8 @@ pin in bit changing     = 0  "Gear change in progress";
 
 pin in bit spindle_on     = 0  "Motion component spindle.N.on ";
 
+pin in bit machine_ready     = 0  "Motion component motion.motion-enabled";
+
 pin out bit estop_out       = 0  "This pin will trigger emergency stop in case of an unrecoverably fatal error.";
 
 function _;
@@ -102,7 +104,7 @@ FUNCTION(_)
         g_setup_done = true;
     }
 
-    if (!spindle_on)
+    if (!machine_ready)
     {
         set_gear_request(&zero_gear);
         return;
