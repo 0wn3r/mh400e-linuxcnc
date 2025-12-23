@@ -46,6 +46,9 @@ pin in bit spindle_on     = 0  "Motion component spindle.N.on ";
 pin in bit machine_ready     = 0  "Motion component motion.motion-enabled";
 
 pin out bit estop_out       = 0  "This pin will trigger emergency stop in case of an unrecoverably fatal error.";
+pin out float timeout_timer       "Current value of elapsed cycle time";
+param rw float cycletime=77      "Time for wait";
+variable double ctimer=0;
 
 function _;
 
@@ -107,12 +110,15 @@ FUNCTION(_)
     if (!machine_ready)
     {
         set_gear_request(&zero_gear);
+        estop_out = 0;
+        ctimer=0;
         return;
     }
 
     /* Gear shift is in progress */
     if (!changing)
     {
+        ctimer=0;
         if (g_last_spindle_speed == spindle_speed_in_abs)
         {
             /* Nothing to do */
@@ -130,5 +136,14 @@ FUNCTION(_)
 
         /* This call will set the outputs pins! */
         set_gear_request(new_gear);
+    }
+    else
+    {
+        ctimer+=fperiod;
+        timeout_timer = ctimer;
+        if (ctimer > cycletime)
+        {
+            estop_out = 1;
+        }
     }
 }
