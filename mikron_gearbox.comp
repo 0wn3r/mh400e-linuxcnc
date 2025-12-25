@@ -24,7 +24,8 @@ license "GPL";
 
 /* to be connected with motion.spindle−speed−out−abs */
 pin in float spindle_speed_in_abs = 0 "Desired spindle speed in rotations per minute, always positive regardless of spindle direction.";
-pin out float spindle_speed_out = 0 "Actual spindle speed feedback in revolutions per second";
+pin out float spindle_speed_out_rps = 0 "Actual spindle speed feedback in revolutions per second";
+pin out float spindle_speed_out = 0 "Actual spindle speed feedback in revolutions per minute";
 
 pin out bit block_one_forward = 0 "Request forward position for block 1";
 pin out bit block_one_middle = 0 "Request middle position for block 1";
@@ -129,7 +130,8 @@ FUNCTION(_)
         pair_t *new_gear = select_gear_from_rpm(g_tree_rpm,
                                                 spindle_speed_in_abs);
 
-        spindle_speed_out = new_gear->key / 60.0;
+        spindle_speed_out_rps = new_gear->key / 60.0;
+        spindle_speed_out = new_gear->key;
 
         /* Save the speed so we don't call gear selection if it not changed */
         g_last_spindle_speed = spindle_speed_in_abs;
