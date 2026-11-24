@@ -35,9 +35,9 @@ Speeds between 0 and *min-rpm* are raised to *min-rpm*. When the spindle is off
 
 *vfd-freq* is 0 while a gear change is running or has just been requested, and
 *twitch-freq* while *twitch* is TRUE (gear-mesh twitch from the ladder).
-*at-speed* follows the VFD "frequency reached" output (*vfd-at-speed*), but only while a
-real speed is requested, outside gear changes and twitches, and once it has been TRUE for
-*at-speed-delay* since the last change of *vfd-freq* (covers the VFD analog input filter).
+*at-speed* is set when a model of the VFD ramp (*accel-rate*/*decel-rate*, Hz/s, matched to
+the VFD acceleration/deceleration times) has reached *vfd-freq* while the VFD gets a run
+command (*run-forward* or *run-reverse*).
 """;
 
 author "Sergey 'Jin' Bostandzhyan && Eduard Kachur";
@@ -45,8 +45,8 @@ license "GPL";
 
 /* to be connected with spindle.0.speed-out-abs */
 pin in float spindle_speed_in_abs = 0 "Desired spindle speed in rpm, always positive regardless of spindle direction";
-pin out float spindle_speed_out_rps = 0 "Commanded spindle speed in revolutions per second (after limits)";
-pin out float spindle_speed_out = 0 "Commanded spindle speed in rpm (after limits)";
+pin out float spindle_speed_out_rps = 0 "Estimated spindle speed in revolutions per second (from the VFD ramp model)";
+pin out float spindle_speed_out = 0 "Estimated spindle speed in rpm (from the VFD ramp model)";
 
 pin out bit block_one_forward = 0 "Request forward position for block 1";
 pin out bit block_one_middle = 0 "Request middle position for block 1";
@@ -64,10 +64,12 @@ pin in bit changing = 0 "Gear change in progress (ladder)";
 pin in bit spindle_on = 0 "spindle.0.on; FALSE shifts to neutral";
 pin in bit machine_ready = 0 "Machine on";
 pin in bit twitch = 0 "Gear-mesh twitch from the ladder, VFD runs at twitch-freq";
-pin in bit vfd_at_speed = 0 "VFD frequency reached output";
+pin in bit run_forward = 0 "VFD run forward command (X1)";
+pin in bit run_reverse = 0 "VFD run reverse command (X2)";
 
 pin out float vfd_freq = 0 "VFD frequency command in Hz (to the analog output)";
-pin out bit at_speed = 0 "VFD has reached vfd-freq for the requested speed";
+pin out bit at_speed = 0 "VFD ramp model has reached vfd-freq";
+pin out float freq_model = 0 "Modelled VFD output frequency, Hz";
 pin out s32 gear = 0 "Requested gear table index, 0 = neutral";
 pin out float gear_rpm = 0 "Synchronous speed of the requested gear at base-freq";
 
@@ -81,13 +83,14 @@ param rw float max_freq = 60 "Highest VFD frequency, Hz";
 param rw float hold_freq = 45 "Keep the current gear down to this frequency, Hz";
 param rw float twitch_freq = 10 "VFD frequency during a gear-mesh twitch, Hz";
 param rw float settle_time = 0.3 "Frequency stays 0 this long after a new gear request, s";
-param rw float at_speed_delay = 0.2 "vfd-at-speed must be TRUE this long after a vfd-freq change, s";
+param rw float accel_rate = 20 "VFD acceleration, Hz/s (max-freq / acceleration time)";
+param rw float decel_rate = 20 "VFD deceleration, Hz/s (max-freq / deceleration time)";
+param rw float at_speed_tol = 0.5 "at-speed tolerance, Hz";
 
 variable double ctimer = 0;
 variable double settle = 0;
 variable int cur = -1;
-variable double t_stable = 0;
-variable double last_out = 0;
+variable double est_gear = 0;
 
 function _;
 
@@ -127,8 +130,8 @@ FUNCTION(_)
         settle = 0;
         vfd_freq = 0;
         at_speed = 0;
-        t_stable = 0;
-        last_out = 0;
+        freq_model = 0;
+        est_gear = 0;
         spindle_speed_out = 0;
         spindle_speed_out_rps = 0;
         return;
@@ -196,16 +199,30 @@ FUNCTION(_)
     if (out < 0) out = 0;
     vfd_freq = out;
 
-    /* VFD frequency reached, ignored until it had time to see a new command */
-    if (fabs(out - last_out) > 0.01 || !vfd_at_speed)
-        t_stable = 0;
-    else if (t_stable < at_speed_delay)
-        t_stable += fperiod;
-    last_out = out;
+    /* model of the VFD ramp */
+    {
+        int running = run_forward || run_reverse;
+        double goal = running ? out : 0;
+        double f = freq_model;
+        if (f < goal)
+        {
+            f += accel_rate * fperiod;
+            if (f > goal) f = goal;
+        }
+        else if (f > goal)
+        {
+            f -= decel_rate * fperiod;
+            if (f < goal) f = goal;
+        }
+        freq_model = f;
 
-    at_speed = vfd_at_speed && target > 0 && !changing && !twitch
-               && t_stable >= at_speed_delay;
+        at_speed = running && target > 0 && !changing && !twitch
+                   && fabs(freq_model - out) <= at_speed_tol;
+    }
 
-    spindle_speed_out = (target > 0) ? s : 0;
+    /* keep the last gear for the estimate while the spindle coasts down
+     * after a neutral request */
+    if (gear_rpm > 0 || freq_model <= 0) est_gear = gear_rpm;
+    spindle_speed_out = est_gear * freq_model / base_freq;
     spindle_speed_out_rps = spindle_speed_out / 60.0;
 }
