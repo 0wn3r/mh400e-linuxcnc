@@ -26,25 +26,25 @@ functions directly in the header files.
 */
 
 
-static int select_gear_stepless(double rpm, int cur, double base_freq,
-                                double max_freq, double hold_freq)
+static int select_gear_stepless(double rpm, int cur_index, double f_base,
+                                double f_max, double f_hold)
 {
     int i;
     const double eps = 1e-6;
 
-    if (cur >= MIKRON_MIN_RPM_INDEX && cur <= (int)MIKRON_MAX_GEAR_INDEX)
+    if (cur_index >= MIKRON_MIN_RPM_INDEX && cur_index <= (int)MIKRON_MAX_GEAR_INDEX)
     {
-        double c = mikron_gears[cur].key;
-        if (rpm >= c * hold_freq / base_freq - eps &&
-            rpm <= c * max_freq / base_freq + eps)
+        double c = mikron_gears[cur_index].key;
+        if (rpm >= c * f_hold / f_base - eps &&
+            rpm <= c * f_max / f_base + eps)
         {
-            return cur;
+            return cur_index;
         }
     }
 
     for (i = MIKRON_MIN_RPM_INDEX; i <= (int)MIKRON_MAX_GEAR_INDEX; i++)
     {
-        if (mikron_gears[i].key * max_freq / base_freq >= rpm - eps)
+        if (mikron_gears[i].key * f_max / f_base >= rpm - eps)
         {
             return i;
         }

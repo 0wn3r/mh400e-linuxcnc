@@ -32,18 +32,18 @@ functions directly in the header files.
 
 /* Select the gear for a stepless speed request (VFD driven motor).
  *
- * The gear table speeds are synchronous speeds at base_freq. A speed rpm
- * runs in gear c at f = base_freq * rpm / c.
+ * The gear table speeds are synchronous speeds at f_base. A speed rpm
+ * runs in gear c at f = f_base * rpm / c.
  *
- * The current gear (cur, gear table index, < MIKRON_MIN_RPM_INDEX if none)
- * is kept while f stays within [hold_freq, max_freq]. Otherwise the lowest
- * gear that reaches rpm at max_freq is returned. rpm must be > 0; it is not
+ * The current gear (cur_index, gear table index, < MIKRON_MIN_RPM_INDEX if none)
+ * is kept while f stays within [f_hold, f_max]. Otherwise the lowest
+ * gear that reaches rpm at f_max is returned. rpm must be > 0; it is not
  * clamped here.
  *
  * Returns the gear table index.
  */
-static int select_gear_stepless(double rpm, int cur, double base_freq,
-                                double max_freq, double hold_freq);
+static int select_gear_stepless(double rpm, int cur_index, double f_base,
+                                double f_max, double f_hold);
 
 /* really ugly way of keeping more order and splitting the sources,
  * halcompile does not allow to link multipe source files together, so
