@@ -18,14 +18,35 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 */
 
-component mikron_gearbox "Component to control output block position request for Mikron WF41C gearbox";
+component mikron_gearbox "Gear selection and VFD frequency for the Mikron WF41C gearbox";
+
+description """
+Selects the gearbox position for the requested spindle speed and the VFD frequency
+that gives the exact speed inside that gear (stepless, 40 rpm .. 4800 rpm).
+
+The gear table speeds are the synchronous speeds at *base-freq* (50 Hz). A requested
+speed S runs in gear c at f = base-freq * S / c. The lowest gear with
+c * max-freq / base-freq >= S is selected, so f stays between about 47 Hz and
+*max-freq* (60 Hz). While the spindle stays on, the current gear is kept as long as
+f stays between *hold-freq* and *max-freq* to avoid needless shifts.
+
+Speeds between 0 and *min-rpm* are raised to *min-rpm*. When the spindle is off
+(spindle-on FALSE) or S is 0 the gearbox is shifted to neutral.
+
+*vfd-freq* is 0 while a gear change is running or has just been requested, and
+*twitch-freq* while *twitch* is TRUE (gear-mesh twitch from the ladder).
+*at-speed* follows the VFD "frequency reached" output (*vfd-at-speed*), but only while a
+real speed is requested, outside gear changes and twitches, and once it has been TRUE for
+*at-speed-delay* since the last change of *vfd-freq* (covers the VFD analog input filter).
+""";
+
 author "Sergey 'Jin' Bostandzhyan && Eduard Kachur";
 license "GPL";
 
-/* to be connected with motion.spindle−speed−out−abs */
-pin in float spindle_speed_in_abs = 0 "Desired spindle speed in rotations per minute, always positive regardless of spindle direction.";
-pin out float spindle_speed_out_rps = 0 "Actual spindle speed feedback in revolutions per second";
-pin out float spindle_speed_out = 0 "Actual spindle speed feedback in revolutions per minute";
+/* to be connected with spindle.0.speed-out-abs */
+pin in float spindle_speed_in_abs = 0 "Desired spindle speed in rpm, always positive regardless of spindle direction";
+pin out float spindle_speed_out_rps = 0 "Commanded spindle speed in revolutions per second (after limits)";
+pin out float spindle_speed_out = 0 "Commanded spindle speed in rpm (after limits)";
 
 pin out bit block_one_forward = 0 "Request forward position for block 1";
 pin out bit block_one_middle = 0 "Request middle position for block 1";
@@ -36,20 +57,37 @@ pin out bit block_two_backward = 0 "Request backward position for block 2";
 pin out bit block_three_forward = 0 "Request forward position for block 3";
 pin out bit block_three_middle = 0 "Request middle position for block 3";
 pin out bit block_three_backward = 0 "Request backward position for block 3";
-pin out bit motor_slow = 0 "Request first spindle motor speed";
-pin out bit motor_fast = 0 "Request second spindle motor speed";
+pin out bit motor_slow = 0 "Request first spindle motor speed range (delta)";
+pin out bit motor_fast = 0 "Request second spindle motor speed range (YY)";
 
-/* spindle status pin */
-pin in bit changing     = 0  "Gear change in progress";
+pin in bit changing = 0 "Gear change in progress (ladder)";
+pin in bit spindle_on = 0 "spindle.0.on; FALSE shifts to neutral";
+pin in bit machine_ready = 0 "Machine on";
+pin in bit twitch = 0 "Gear-mesh twitch from the ladder, VFD runs at twitch-freq";
+pin in bit vfd_at_speed = 0 "VFD frequency reached output";
 
-pin in bit spindle_on     = 0  "Motion component spindle.N.on ";
+pin out float vfd_freq = 0 "VFD frequency command in Hz (to the analog output)";
+pin out bit at_speed = 0 "VFD has reached vfd-freq for the requested speed";
+pin out s32 gear = 0 "Requested gear table index, 0 = neutral";
+pin out float gear_rpm = 0 "Synchronous speed of the requested gear at base-freq";
 
-pin in bit machine_ready     = 0  "Motion component motion.motion-enabled";
+pin out bit estop_out = 0 "Gear change took longer than cycletime";
+pin out float timeout_timer "Current value of elapsed gear change time";
 
-pin out bit estop_out       = 0  "This pin will trigger emergency stop in case of an unrecoverably fatal error.";
-pin out float timeout_timer       "Current value of elapsed cycle time";
-param rw float cycletime=77      "Time for wait";
-variable double ctimer=0;
+param rw float cycletime = 77 "Gear change timeout, s";
+param rw float min_rpm = 40 "Lowest spindle speed, lower requests are raised to it";
+param rw float base_freq = 50 "Frequency the gear table speeds refer to, Hz";
+param rw float max_freq = 60 "Highest VFD frequency, Hz";
+param rw float hold_freq = 45 "Keep the current gear down to this frequency, Hz";
+param rw float twitch_freq = 10 "VFD frequency during a gear-mesh twitch, Hz";
+param rw float settle_time = 0.3 "Frequency stays 0 this long after a new gear request, s";
+param rw float at_speed_delay = 0.2 "vfd-at-speed must be TRUE this long after a vfd-freq change, s";
+
+variable double ctimer = 0;
+variable double settle = 0;
+variable int cur = -1;
+variable double t_stable = 0;
+variable double last_out = 0;
 
 function _;
 
@@ -63,89 +101,111 @@ option singleton yes;
 #include "mikron_util.h"
 #include "mikron_gears.h"
 
-static float g_last_spindle_speed = 0;
-
-static tree_node_t *g_tree_rpm = NULL;
-
 static bool g_setup_done = false;
 
-/* one time setup, called from the main function to initialize whatever we
- * need */
-FUNCTION(setup)
-{
-    int i;
-
-    /* Initialize state data structures */
-    gearbox_setup(__comp_inst, period);
-
-    /* we want to have key:value pairs in the binary search tree, where
-     * the value represents the index of the key in our gears array. So
-     * we'll put things together the way we need them for the tree generation
-     */
-    pair_t temp[MIKRON_NUM_GEARS];
-    for (i = 0; i < MIKRON_NUM_GEARS; i++)
-    {
-        temp[i].key = mikron_gears[i].key;
-        temp[i].value = i;
-    }
-
-    /* build up binary tree from the gears array to search by rpm, this
-     * array is already sorted */
-    g_tree_rpm = tree_from_sorted_array(temp, MIKRON_NUM_GEARS);
-
-    g_last_spindle_speed = spindle_speed_in_abs;
-}
-
-
-/* main component function */
 FUNCTION(_)
 {
-    /* perform one time setup */
+    double s, target, out;
+    int want;
+
     if (!g_setup_done)
     {
-        setup(__comp_inst, period);
+        gearbox_setup(__comp_inst, period);
         set_gear_request(&zero_gear);
         g_setup_done = true;
     }
 
     if (!machine_ready)
     {
+        /* drop all requests; cur = -1 makes the next request go out again */
         set_gear_request(&zero_gear);
+        cur = -1;
+        gear = 0;
+        gear_rpm = 0;
         estop_out = 0;
-        ctimer=0;
+        ctimer = 0;
+        settle = 0;
+        vfd_freq = 0;
+        at_speed = 0;
+        t_stable = 0;
+        last_out = 0;
+        spindle_speed_out = 0;
+        spindle_speed_out_rps = 0;
         return;
     }
 
-    /* Gear shift is in progress */
-    if (!changing)
+    /* requested speed, limited to what the gearbox and VFD can do */
+    s = spindle_speed_in_abs;
+    if (spindle_on && s > 0)
     {
-        ctimer=0;
-        if (g_last_spindle_speed == spindle_speed_in_abs)
-        {
-            /* Nothing to do */
-            return;
-        }
-
-        /* Select new gear from rpm */
-        pair_t *new_gear = select_gear_from_rpm(g_tree_rpm,
-                                                spindle_speed_in_abs);
-
-        spindle_speed_out_rps = new_gear->key / 60.0;
-        spindle_speed_out = new_gear->key;
-
-        /* Save the speed so we don't call gear selection if it not changed */
-        g_last_spindle_speed = spindle_speed_in_abs;
-
-        /* This call will set the outputs pins! */
-        set_gear_request(new_gear);
+        double smax = mikron_gears[MIKRON_MAX_GEAR_INDEX].key * max_freq / base_freq;
+        if (s < min_rpm) s = min_rpm;
+        if (s > smax) s = smax;
+        want = select_gear_stepless(s, cur, base_freq, max_freq, hold_freq);
     }
     else
     {
-        ctimer+=fperiod;
+        s = 0;
+        want = MIKRON_NEUTRAL_GEAR_INDEX;
+    }
+
+    if (!changing)
+    {
+        ctimer = 0;
+        timeout_timer = 0;
+        if (want != cur)
+        {
+            /* new requests only between gear changes */
+            set_gear_request(&mikron_gears[want]);
+            cur = want;
+            settle = 0;
+        }
+        else if (settle < settle_time)
+        {
+            settle += fperiod;
+        }
+    }
+    else
+    {
+        settle = 0;
+        ctimer += fperiod;
         timeout_timer = ctimer;
         if (ctimer > cycletime)
         {
             estop_out = 1;
         }
     }
+
+    gear = cur;
+    gear_rpm = (cur > 0) ? mikron_gears[cur].key : 0;
+
+    /* frequency for the requested speed in the requested gear */
+    target = 0;
+    if (cur > 0 && cur == want && s > 0)
+    {
+        target = base_freq * s / gear_rpm;
+    }
+
+    if (twitch)
+        out = twitch_freq;
+    else if (changing || settle < settle_time)
+        out = 0;
+    else
+        out = target;
+    if (out > max_freq) out = max_freq;
+    if (out < 0) out = 0;
+    vfd_freq = out;
+
+    /* VFD frequency reached, ignored until it had time to see a new command */
+    if (fabs(out - last_out) > 0.01 || !vfd_at_speed)
+        t_stable = 0;
+    else if (t_stable < at_speed_delay)
+        t_stable += fperiod;
+    last_out = out;
+
+    at_speed = vfd_at_speed && target > 0 && !changing && !twitch
+               && t_stable >= at_speed_delay;
+
+    spindle_speed_out = (target > 0) ? s : 0;
+    spindle_speed_out_rps = spindle_speed_out / 60.0;
 }

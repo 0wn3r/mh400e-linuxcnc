@@ -77,14 +77,15 @@ static pair_t zero_gear = {0, 0};
 /* total number of selectable gears including neutral */
 #define MIKRON_NUM_GEARS        (sizeof(mikron_gears)/sizeof(pair_t))
 /* max gear index in array */
-#define MIKRON_MAX_GEAR_INDEX       MIKRON_NUM_GEARS - 1
+#define MIKRON_MAX_GEAR_INDEX       (MIKRON_NUM_GEARS - 1)
 /* index of neutral gear */
 #define MIKRON_NEUTRAL_GEAR_INDEX   0
 /* min spindle rpm > 0 supported by the MIKRON */
 #define MIKRON_MIN_RPM              40
 /* index of the first non 0 rpm setting in the gears array */
 #define MIKRON_MIN_RPM_INDEX        1
-/* max spindle rpm supported by the MIKRON */
+/* highest gear table speed (synchronous at 50 Hz); with the VFD at 60 Hz the
+ * spindle reaches 4800 rpm, see the max-freq parameter */
 #define MIKRON_MAX_RPM              4000
 
 #endif//__MIKRON_COMMON_H__

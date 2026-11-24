@@ -30,63 +30,20 @@ functions directly in the header files.
 
 #include <rtapi.h>
 
-/* Binary search tree node. */
-typedef struct tree_node
-{
-    unsigned key;
-    unsigned value;
-    struct tree_node *left;
-    struct tree_node *right;
-} tree_node_t;
-
-/* Allocate a tree node and assign it the given key and value.
+/* Select the gear for a stepless speed request (VFD driven motor).
  *
- * Note: hal_malloc() does not have a corresponding free() function,
- * this is the reason why there are no corresponding tree deallocaters.
+ * The gear table speeds are synchronous speeds at base_freq. A speed rpm
+ * runs in gear c at f = base_freq * rpm / c.
  *
- * For our use case it's anyway not a problem, because the trees are
- * built up during intialzation and not modified anymore.
+ * The current gear (cur, gear table index, < MIKRON_MIN_RPM_INDEX if none)
+ * is kept while f stays within [hold_freq, max_freq]. Otherwise the lowest
+ * gear that reaches rpm at max_freq is returned. rpm must be > 0; it is not
+ * clamped here.
+ *
+ * Returns the gear table index.
  */
-static tree_node_t *tree_node_allocate(unsigned key, unsigned value);
-
-/* Find the key of the left leaf node. */
-static int tree_leaf_left(tree_node_t *node);
-
-/* Find the key of the right leaf node. */
-static int tree_leaf_right(tree_node_t *node);
-
-/* Build up a tree from a sorted array. */
-static tree_node_t *tree_from_sorted_array(pair_t *array, size_t length);
-
-/* Return tree node by the given key.
- * If no exact match of the key was found, return the closest available.
- * This is useful when we get spindle rpm values as user in put, but
- * need to quantize them to the speeds supported by the machine. */
-static tree_node_t *tree_search_closest_match(tree_node_t *root,
-                                              unsigned key);
-
-/* Return tree node by the given key, if there is no exact match (i.e.
- * key not found), return NULL. */
-static tree_node_t *tree_search(tree_node_t *root, unsigned key);
-
-/* Simple bubble sort to get our gear arrays in order. */
-static void sort_array_by_key(pair_t array[], size_t length);
-
-/* Find the closest matching gear that is supported by the MIKRON.
- *
- * Everything <= 0 is matched to 0. Everything >4000 is matched to 4000,
- * which is the maximum supported speed.
- * Everything in the range 0 < rpm < 40 is matched to 80 (lowest supported
- * speed), since we assume that a value higher than zero implies spindle
- * movement.
- *
- * Note, that this function does no actually perform any pin writing operations,
- * is only quantizes the input rpm to a supported speed.
- *
- * Returns speed "pair" where rpm is stored in the "key" and the pin bitmask
- * is stored in "value".
- */
-static pair_t *select_gear_from_rpm(tree_node_t *tree, float rpm);
+static int select_gear_stepless(double rpm, int cur, double base_freq,
+                                double max_freq, double hold_freq);
 
 /* really ugly way of keeping more order and splitting the sources,
  * halcompile does not allow to link multipe source files together, so
